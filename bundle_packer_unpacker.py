@@ -670,17 +670,39 @@ def pack_bundle(resource_entries_path, output_directory, output_name):
 			print("Error: not a valid bundle. Magic number (bnd2) is incorrect.")
 			return 1
 		
-		muVersion = struct.unpack("<I", f.read(0x4))[0]
-		muPlatform = struct.unpack("<I", f.read(0x4))[0]
-		if muPlatform != 0x1:
-			print("Error: bundle platform not supported yet. Select a PC file version.")
+		muVersion = f.read(0x4)
+		muPlatform = f.read(0x4)
+
+		muVersion_little_endian = struct.unpack("<I", muVersion)[0]
+		muVersion_big_endian = struct.unpack(">I", muVersion)[0]
+
+		muPlatform_little_endian = struct.unpack("<I", muPlatform)[0]
+		muPlatform_big_endian = struct.unpack(">I", muPlatform)[0]
+		
+		if muPlatform_little_endian == 0x1:
+			print("Info: bundle platform is PC or PS4.")
+			endian = "<"
+			muVersion = muVersion_little_endian
+			muPlatform = muPlatform_little_endian
+		elif muPlatform_big_endian == 0x2:
+			print("Info: bundle platform is X360.")
+			endian = ">"
+			muVersion = muVersion_big_endian
+			muPlatform = muPlatform_big_endian
+		elif muPlatform_big_endian == 0x3:
+			print("Info: bundle platform is PS3.")
+			endian = ">"
+			muVersion = muVersion_big_endian
+			muPlatform = muPlatform_big_endian
+		else:
+			print("Error: bundle platform not supported yet. Select a PC, PS3, PS4 or X360 file version.")
 			return 1
 		
-		muDebugDataOffset = struct.unpack("<I", f.read(0x4))[0]
-		muResourceEntriesCount = struct.unpack("<I", f.read(0x4))[0]
-		muResourceEntriesOffset = struct.unpack("<I", f.read(0x4))[0]
-		mauResourceDataOffset = struct.unpack("<3I", f.read(0xC))
-		muFlags = struct.unpack("<I", f.read(0x4))[0]
+		muDebugDataOffset = struct.unpack(f"{endian}I", f.read(0x4))[0]
+		muResourceEntriesCount = struct.unpack(f"{endian}I", f.read(0x4))[0]
+		muResourceEntriesOffset = struct.unpack(f"{endian}I", f.read(0x4))[0]
+		mauResourceDataOffset = struct.unpack(f"{endian}3I", f.read(0xC))
+		muFlags = struct.unpack(f"{endian}I", f.read(0x4))[0]
 		padding = f.read(0x8)
 		
 		muResourceEntriesCount_verification = (len_resource_entries_data - muResourceEntriesOffset)//0x40
@@ -689,13 +711,14 @@ def pack_bundle(resource_entries_path, output_directory, output_name):
 			muResourceEntriesCount = muResourceEntriesCount_verification
 		
 		debug_data = f.read(muResourceEntriesOffset - f.tell())
+		muOffset = muResourceEntriesOffset + (0x4 if endian == ">" else 0x0)
 		
 		mResources = []
 		for i in range(0, muResourceEntriesCount):
-			f.seek(muResourceEntriesOffset + i*0x40, 0)
+			f.seek(muOffset + i*0x40, 0)
 			mResourceId = bytes_to_id(f.read(0x4))
-			f.seek(0x34, 1)
-			muResourceTypeId = struct.unpack("<I", f.read(0x4))[0]
+			f.seek(0x30 + 0x4 if endian == "<" else 0, 1)
+			muResourceTypeId = struct.unpack(f"{endian}I", f.read(0x4))[0]
 			
 			muResourceType, nibbles = get_resourcetype_nibble(muResourceTypeId)
 			
@@ -821,21 +844,21 @@ def pack_bundle(resource_entries_path, output_directory, output_name):
 				if muResourceType == 'Material':
 					f.seek(0x8, 0)
 					num_shader = 1
-					num_material_states = struct.unpack("<B", f.read(0x1))[0]
-					num_texture_states = struct.unpack("<B", f.read(0x1))[0]
+					num_material_states = struct.unpack(f"{endian}B", f.read(0x1))[0]
+					num_texture_states = struct.unpack(f"{endian}B", f.read(0x1))[0]
 					muImportCount = num_shader + num_material_states + num_texture_states
 					muImportOffset = os.path.getsize(resource_path) - muImportCount*0x10
 					
 				elif muResourceType == 'Renderable':
 					f.seek(0x12, 0)
-					num_meshes = struct.unpack("<H", f.read(0x2))[0]
-					meshes_table_pointer = struct.unpack("<i", f.read(0x4))[0]
+					num_meshes = struct.unpack(f"{endian}H", f.read(0x2))[0]
+					meshes_table_pointer = struct.unpack(f"{endian}i", f.read(0x4))[0]
 					f.seek(meshes_table_pointer, 0)
-					meshes_data_pointer = struct.unpack("<%di" % num_meshes, f.read(0x4*num_meshes))
+					meshes_data_pointer = struct.unpack(f"{endian}{num_meshes}i", f.read(0x4*num_meshes))
 					num_vertex_descriptors_total = 0
 					for i in range(0, num_meshes):
 						f.seek(meshes_data_pointer[i] + 0x54, 0)
-						num_vertex_descriptors_total += struct.unpack("<B", f.read(0x1))[0]
+						num_vertex_descriptors_total += struct.unpack(f"{endian}B", f.read(0x1))[0]
 					del meshes_data_pointer
 					muImportCount = num_meshes + num_vertex_descriptors_total
 					muImportOffset = os.path.getsize(resource_path) - muImportCount*0x10
@@ -850,7 +873,7 @@ def pack_bundle(resource_entries_path, output_directory, output_name):
 					
 				elif muResourceType == 'AptDataHeaderType':
 					f.seek(0x14, 0)
-					fileSize = struct.unpack("<I", f.read(0x4))[0]
+					fileSize = struct.unpack(f"{endian}I", f.read(0x4))[0]
 					fileSize += calculate_padding(fileSize, 0x10)
 					muImportCount = int((os.path.getsize(resource_path) - fileSize)/0x10)
 					if muImportCount == 0:
@@ -860,58 +883,56 @@ def pack_bundle(resource_entries_path, output_directory, output_name):
 					
 				elif muResourceType == 'Font':
 					f.seek(0x12C, 0)
-					muNumTexturePages = struct.unpack("<I", f.read(0x4))[0]
+					muNumTexturePages = struct.unpack(f"{endian}I", f.read(0x4))[0]
 					muImportCount = muNumTexturePages
 					muImportOffset = os.path.getsize(resource_path) - muImportCount*0x10
 					
 				elif muResourceType == 'InstanceList':
-					mpaInstances, muArraySize = struct.unpack("<II", f.read(0x8))
+					mpaInstances, muArraySize = struct.unpack(f"{endian}II", f.read(0x8))
 					muImportOffset = mpaInstances + 0x50*muArraySize
 					muImportCount = muArraySize
 					
 				elif muResourceType == 'IdList':
-					#muImportOffset = struct.unpack("<I", f.read(0x4))[0]
-					#muImportCount = struct.unpack("<I", f.read(0x4))[0]
 					muImportOffset = 0
 					muImportCount = 0
 						
 				elif muResourceType == 'Model':
 					f.seek(0x10, 0)
-					mu8NumRenderables = struct.unpack("<B", f.read(0x1))[0]
+					mu8NumRenderables = struct.unpack(f"{endian}B", f.read(0x1))[0]
 					muImportCount = mu8NumRenderables
 					muImportOffset = os.path.getsize(resource_path) - muImportCount*0x10
 					
 				elif muResourceType == 'Shader':
 					f.seek(0x4, 0)
-					num_resource_pairs = struct.unpack("<B", f.read(0x1))[0]
+					num_resource_pairs = struct.unpack(f"{endian}B", f.read(0x1))[0]
 					muImportCount = num_resource_pairs*2
 					muImportOffset = os.path.getsize(resource_path) - muImportCount*0x10
 					
 				elif muResourceType == 'GraphicsSpec':
 					f.seek(0x4, 0)
-					muPartsCount = struct.unpack("<I", f.read(0x4))[0]
+					muPartsCount = struct.unpack(f"{endian}I", f.read(0x4))[0]
 					f.seek(0xC, 0)
-					muShatteredGlassPartsCount = struct.unpack("<I", f.read(0x4))[0]
+					muShatteredGlassPartsCount = struct.unpack(f"{endian}I", f.read(0x4))[0]
 					muImportCount = muPartsCount + muShatteredGlassPartsCount
 					muImportOffset = os.path.getsize(resource_path) - muImportCount*0x10
 					
 				elif muResourceType == 'ParticleDescriptionCollection':
 					f.seek(0x4, 0)
-					muTableSize = struct.unpack("<I", f.read(0x4))[0]
+					muTableSize = struct.unpack(f"{endian}I", f.read(0x4))[0]
 					muImportCount = muTableSize
 					muImportOffset = os.path.getsize(resource_path) - muImportCount*0x10
 					
 				elif muResourceType == 'WheelGraphicsSpec':
-					_, mpWheelModel, mpCaliperModel = struct.unpack("<Iii", f.read(0xC))
+					_, mpWheelModel, mpCaliperModel = struct.unpack(f"{endian}Iii", f.read(0xC))
 					muImportCount = 1
 					if mpCaliperModel != -1:
 						muImportCount = 2
 					muImportOffset = os.path.getsize(resource_path) - muImportCount*0x10
 					
 				elif muResourceType == 'PropGraphicsList':
-					muSizeInBytes, _ = struct.unpack("<II", f.read(0x8))
-					muNumberOfPropModels = struct.unpack("<I", f.read(0x4))[0]
-					muNumberOfPropPartModels = struct.unpack("<I", f.read(0x4))[0]
+					muSizeInBytes, _ = struct.unpack(f"{endian}II", f.read(0x8))
+					muNumberOfPropModels = struct.unpack(f"{endian}I", f.read(0x4))[0]
+					muNumberOfPropPartModels = struct.unpack(f"{endian}I", f.read(0x4))[0]
 					muImportCount = muNumberOfPropModels + muNumberOfPropPartModels
 					if muImportCount == 0:
 						muImportOffset = 0
@@ -924,9 +945,9 @@ def pack_bundle(resource_entries_path, output_directory, output_name):
 					
 				elif muResourceType == 'EnvironmentTimeLine':
 					f.seek(0x8, 0)
-					mpLocationDatii = struct.unpack("<I", f.read(0x4))[0]
+					mpLocationDatii = struct.unpack(f"{endian}I", f.read(0x4))[0]
 					f.seek(mpLocationDatii, 0)
-					muKeyframeCnt = struct.unpack("<I", f.read(0x4))[0]
+					muKeyframeCnt = struct.unpack(f"{endian}I", f.read(0x4))[0]
 					muImportCount = muKeyframeCnt
 					muImportOffset = os.path.getsize(resource_path) - muImportCount*0x10
 					
@@ -936,13 +957,13 @@ def pack_bundle(resource_entries_path, output_directory, output_name):
 					
 				elif muResourceType == 'FlaptFile':
 					f.seek(0x4, 0)
-					muSizeInBytes = struct.unpack("<I", f.read(0x4))[0]
+					muSizeInBytes = struct.unpack(f"{endian}I", f.read(0x4))[0]
 					muImportOffset = muSizeInBytes
 					muImportCount = int((os.path.getsize(resource_path) - muImportOffset)/0x10)
 				
 				for i in range(0, muImportCount):
 					f.seek(muImportOffset + i*0x10, 0)
-					muImportHash = muImportHash | struct.unpack("<I", f.read(0x4))[0]
+					muImportHash = muImportHash | struct.unpack(f"{endian}I", f.read(0x4))[0]
 		
 		mResource.extend([int(muImportOffset), muImportCount, muImportHash])
 	
@@ -955,13 +976,13 @@ def pack_bundle(resource_entries_path, output_directory, output_name):
 	
 	with open(output_path, "wb") as f:
 		f.write(macMagicNumber.encode('utf-8'))
-		f.write(struct.pack('<I', muVersion))
-		f.write(struct.pack('<I', muPlatform))
-		f.write(struct.pack('<I', muDebugDataOffset))
-		f.write(struct.pack('<I', muResourceEntriesCount))
-		f.write(struct.pack('<I', muResourceEntriesOffset))
-		f.write(struct.pack('<III', *mauResourceDataOffset))
-		f.write(struct.pack('<I', muFlags))
+		f.write(struct.pack(f'{endian}I', muVersion))
+		f.write(struct.pack(f'{endian}I', muPlatform))
+		f.write(struct.pack(f'{endian}I', muDebugDataOffset))
+		f.write(struct.pack(f'{endian}I', muResourceEntriesCount))
+		f.write(struct.pack(f'{endian}I', muResourceEntriesOffset))
+		f.write(struct.pack(f'{endian}III', *mauResourceDataOffset))
+		f.write(struct.pack(f'{endian}I', muFlags))
 		f.seek(0x8, 1)
 		
 		f.write(debug_data)
@@ -976,23 +997,30 @@ def pack_bundle(resource_entries_path, output_directory, output_name):
 			muImportOffset = mResource[8]
 			muImportCount = mResource[9]
 			muImportHash = mResource[10]
+
+			print(f"Packing {muResourceType} resource {mResourceId}")
 			
 			muResourceTypeId, nibbles = get_resourcetypeid_nibble(muResourceType)
 			
 			mauUncompressedSizeAndAlignment = [mauUncompressedSize[i] + nibbles[i] for i in range(3)]
 			
-			f.write(id_to_bytes(mResourceId))
-			f.write(struct.pack("<I", 0))
-			f.write(struct.pack("<I", muImportHash))
-			f.write(struct.pack("<I", 0))
-			f.write(struct.pack("<III", *mauUncompressedSizeAndAlignment))
-			f.write(struct.pack("<III", *mauSizeOnDisk))
-			f.write(struct.pack("<III", *mauDiskOffset))
-			f.write(struct.pack("<I", muImportOffset))
-			f.write(struct.pack("<I", muResourceTypeId))
-			f.write(struct.pack("<H", muImportCount))
-			f.write(struct.pack("<B", 0))
-			f.write(struct.pack("<B", 0))
+			if endian == ">":
+				f.write(struct.pack(f"{endian}I", 0))
+				f.write(id_to_bytes(mResourceId))
+			else:
+				f.write(id_to_bytes(mResourceId))
+				f.write(struct.pack(f"{endian}I", 0))
+
+			f.write(struct.pack(f"{endian}I", muImportHash))
+			f.write(struct.pack(f"{endian}I", 0))
+			f.write(struct.pack(f"{endian}III", *mauUncompressedSizeAndAlignment))
+			f.write(struct.pack(f"{endian}III", *mauSizeOnDisk))
+			f.write(struct.pack(f"{endian}III", *mauDiskOffset))
+			f.write(struct.pack(f"{endian}I", muImportOffset))
+			f.write(struct.pack(f"{endian}I", muResourceTypeId))
+			f.write(struct.pack(f"{endian}H", muImportCount))
+			f.write(struct.pack(f"{endian}B", 0))
+			f.write(struct.pack(f"{endian}B", 0))
 		
 		f.write(resources_data)
 		f.write(bytearray([0])*padding)
