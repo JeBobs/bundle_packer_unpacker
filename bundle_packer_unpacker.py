@@ -711,13 +711,14 @@ def pack_bundle(resource_entries_path, output_directory, output_name):
 			muResourceEntriesCount = muResourceEntriesCount_verification
 		
 		debug_data = f.read(muResourceEntriesOffset - f.tell())
-		muOffset = muResourceEntriesOffset + (0x4 if endian == ">" else 0x0)
+		muEntryOffset = muResourceEntriesOffset + (0x4 if endian == ">" else 0x0)
+		muTypeOffset = 0x30 + (0x4 if endian == "<" else 0)
 		
 		mResources = []
 		for i in range(0, muResourceEntriesCount):
-			f.seek(muOffset + i*0x40, 0)
+			f.seek(muEntryOffset + i*0x40, 0)
 			mResourceId = bytes_to_id(f.read(0x4))
-			f.seek(0x30 + 0x4 if endian == "<" else 0, 1)
+			f.seek(muTypeOffset, 1)
 			muResourceTypeId = struct.unpack(f"{endian}I", f.read(0x4))[0]
 			
 			muResourceType, nibbles = get_resourcetype_nibble(muResourceTypeId)
